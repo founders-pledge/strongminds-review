@@ -1,4 +1,8 @@
+# TODO: Cochrane prior
+# TODO: Economic growth costs of depression
+
 library(rstan)
+library(cmdstanr)
 library(tidyverse)
 
 setwd("/users/mattlerner/desktop/evaluations/strongminds")
@@ -32,9 +36,22 @@ cohen.d <- function(mu1, mu2, se1, se2, n1, n2) {
   return(output)
 }
 
+# inverse quantile function for exponential distribution
 invq.exp <- function(p, quantile) {
   lambda <- (-1 * (log(1-p)))/quantile
   return(lambda)
+}
+
+
+# you can derive this just using the definition of mean and standard deviation
+# the idea here is to imagine that, for all of the attriters, the treatment
+# made approximately no difference, e.g. that all attriters had the mean treatment
+# value before and after the intervention.
+deflate.mean.and.sd <- function(pre_mean, pre_sd, post_mean, post_sd, pre_n, post_n) {
+  attrition <- pre_n - post_n
+  deflated.mean <- ((post_mean*post_n) + (attrition*pre_mean))/pre_n
+  deflated.sd <- sqrt(1/pre_n) * sqrt((post_n * (post_sd^2)) + attrition*(pre_mean-deflated.mean)^2)
+  return(list(mean = deflated.mean, sd = deflated.sd))
 }
 
 ################### Bolton 2003, replicating HLI calculation of Cohen's D ###################
@@ -42,6 +59,10 @@ invq.exp <- function(p, quantile) {
 #bolton.cohen.d <- cohen.d(17.47, 3.55, 1.1, 1.1, 107, 117) # whole group
 bolton.cohen.d <- cohen.d(11.59, 2.38, 0.8, 0.75, 107, 117) # all eligible persons - this seems to be the HLI number
 bolton.cohen.d
+
+# calculate effect size for CONTROL group, e.g. standardized pre-post difference among the untreated
+bolton.control.cohen <- cohen.d(23.65, 21.14, 6.3, 8.19, 178, 178)
+bolton.control.cohen
 
 ################### Background work ###################
 
@@ -86,7 +107,7 @@ severe.depression.cutoff <- 15 # manual has cutoffs at 15 for "moderately severe
 depression.cutoff <- 10
 score.reduction <- 1
 
-# percentage-point difference in the incidence of major depression
+# percentage-point incidence in the incidence of major depression
 normal.mild.incidence <- mean(phq9.dist >= mild.depression.cutoff & phq9.dist < moderate.depression.cutoff)
 normal.moderate.incidence <- mean(phq9.dist >= moderate.depression.cutoff & phq9.dist < severe.depression.cutoff)
 normal.severe.incidence <- mean(phq9.dist >= severe.depression.cutoff)
@@ -107,29 +128,79 @@ mild.change
 moderate.change
 severe.change
 
+
+###### StrongMinds phase 2 assessment data
+# evaluation
+# https://drive.google.com/file/d/1qSQuM_BF8H-ufzfsETyq2c8jYZ-KHo4d/view
+
+
+###### StrongMinds 2020 RCT data
+
 ################### Meta analysis of StrongMinds pre/post data ###################
 
-# TODO HERE: attempt to correct for selection effects and regression to the mean
-
-# this should come from bolton 2003
-estimated_control_effect <- 2.52
 N <- nrow(strongminds.data.1)
 
+# deflate means and widen SDs to attempt to account for attrition
+# TODO: THIS INFLATES EFFECTS!
+sm.deflations <- deflate.mean.and.sd(strongminds.data.1$pre_mean, strongminds.data.1$pre_sd, strongminds.data.1$post_mean, strongminds.data.1$post_sd, strongminds.data.1$pre_n, strongminds.data.1$post_n)
+strongminds.data.1$post_mean_2 <- sm.deflations$mean
+strongminds.data.1$post_sd_2 <- sm.deflations$sd
+
+# calculate difference between pre and post
+strongminds.data.1$pre.post.adjusted.change <- strongminds.data.1$post_mean_2 - strongminds.data.1$pre_mean
+strongminds.data.1$pre.post.adjusted.sd <- sqrt(strongminds.data.1$pre_sd^2 + strongminds.data.1$post_sd_2^2)
+
+
+# use the "control effect size" from Bolton 2003, converted into our units
+# and adjusted for program length (16 in the case of Bolton, 8 for us)
+strongminds.data.1$counterfactual.score.change <- strongminds.data.1$pre.post.adjusted.sd * (bolton.control.cohen/16)*8
+
+# adjusted change (relative to control)
+# create backed-out SDs for SM programs taking into account attrition
+# assume a null effect for all attriters and recalculate the sd on that basis
+strongminds.data.1$adjusted_change <- strongminds.data.1$pre.post.adjusted.change - strongminds.data.1$counterfactual.score.change
+
+# standardized mean difference
+strongminds.data.1$standardized.mean.difference <- strongminds.data.1$adjusted_change / strongminds.data.1$pre.post.adjusted.sd
+
+# via https://pubmed.ncbi.nlm.nih.gov/31948935/
+# a prior on the standardized mean difference between pre and post in a meta analysis
+# of interventions to mitigate depressive symptoms in adults
+# 1.09 [0.89, 1.30], so an s.d. of approximately 0.1
+prior_mean <- -1.09
+prior_sd <- 0.1
+# TODO: the question here is whether we should use a much more skeptical prior
+
 sm_data <- list(N = N,
-                N_types = max(strongminds.data.1$type_id),
-                types = strongminds.data.1$type_id,
-                mean_change = strongminds.data.1$mean_change,
-                pct_attrition = strongminds.data.1$pct_attrition,
-                pre_n = strongminds.data.1$pre_n,
-                estimated_control_effect = rep(estimated_control_effect, N))
+                adjusted_change = strongminds.data.1$standardized.mean.difference,
+                #adjusted_change = strongminds.data.1$adjusted_change,
+                #change_sd = strongminds.data.1$pre.post.adjusted.sd,
+                change_sd = 1, # because it's standardized
+                prior_mean = prior_mean,
+                prior_sd = prior_mean
+                )
 
 fit_rstan <- stan(
   file = "sm_meta1.stan",
-  data = sm_data
+  data = sm_data,
+  iter = 4000,
+  cores = mc.cores
 )
 
-###### StrongMinds phase 2 assessment data
+extracted.fit <- rstan::extract(fit_rstan)
+mu.posterior <- extracted.fit$mu
+plot(density(mu.posterior))
 
-# TKTKTK
 
-###### StrongMinds 2020 RCT data
+######### DETRITUS ########
+
+# use cmdstan if you have to set adapt_delta
+# there's bug -- it crashes R with rstan
+mod <- cmdstan_model("sm_meta1.stan")
+fit_rstan <- mod$sample(
+  data = sm_data,
+  chains = 4,
+  adapt_delta=0.999,
+  parallel_chains = mc.cores,
+)
+
