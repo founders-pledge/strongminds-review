@@ -9,7 +9,7 @@ mc.cores = parallel::detectCores()
 
 ################### Read in StrongMinds programmes data ###################
 
-strongminds.data.1 <- read.csv("data/hli/StrongMinds data via HLI - Sheet1.csv")
+strongminds.data.1 <- read.csv("data/StrongMinds data via HLI - Sheet1.csv")
 colnames(strongminds.data.1) <- c('program','type','country','year','pre_n','pre_mean','pre_sd','post_n','post_mean','post_sd','mean_change','change_relative_core')
 strongminds.data.1$pre_n <- as.numeric(gsub(",","",strongminds.data.1$pre_n))
 strongminds.data.1$post_n <- as.numeric(gsub(",","",strongminds.data.1$post_n))
@@ -19,7 +19,7 @@ strongminds.data.1$pct_attrition <- strongminds.data.1$attrition/strongminds.dat
 
 ################### Read in HLI's estimates for StrongMinds program effects ###################
 
-hli.strongminds.effects.raw <- read.csv("data/hli/SM's Point Estimate CEA - Cleaner Point Estimate CEA.csv")
+hli.strongminds.effects.raw <- read.csv("data/SM's Point Estimate CEA - Cleaner Point Estimate CEA.csv")
 hli.strongminds.effects <- hli.strongminds.effects.raw[1:8,1:14]
 
 ################### Clean up frames ###################
