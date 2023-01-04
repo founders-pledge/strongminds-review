@@ -9,7 +9,7 @@ mc.cores = parallel::detectCores()
 
 ################### Read in StrongMinds programmes data ###################
 
-strongminds.data.1 <- read.csv("data/StrongMinds data via HLI - Sheet1.csv")
+strongminds.data.1 <- read.csv("data/hli/StrongMinds data via HLI - Sheet1.csv")
 colnames(strongminds.data.1) <- c('program','type','country','year','pre_n','pre_mean','pre_sd','post_n','post_mean','post_sd','mean_change','change_relative_core')
 strongminds.data.1$pre_n <- as.numeric(gsub(",","",strongminds.data.1$pre_n))
 strongminds.data.1$post_n <- as.numeric(gsub(",","",strongminds.data.1$post_n))
@@ -19,7 +19,7 @@ strongminds.data.1$pct_attrition <- strongminds.data.1$attrition/strongminds.dat
 
 ################### Read in HLI's estimates for StrongMinds program effects ###################
 
-hli.strongminds.effects.raw <- read.csv("data/SM's Point Estimate CEA - Cleaner Point Estimate CEA.csv")
+hli.strongminds.effects.raw <- read.csv("data/hli/SM's Point Estimate CEA - Cleaner Point Estimate CEA.csv")
 hli.strongminds.effects <- hli.strongminds.effects.raw[1:8,1:14]
 
 ################### Clean up frames ###################
@@ -194,6 +194,7 @@ rating
 ################### ################### ################### ################### ################### 
 
 ################### Bolton 2003, replicating HLI calculation of Cohen's D ###################
+# Bolton: https://jamanetwork.com/journals/jama/fullarticle/196766
 
 #bolton.cohen.d <- cohen.d(17.47, 3.55, 1.1, 1.1, 107, 117) # whole group
 bolton.cohen.d <- cohen.d(11.59, 2.38, 0.8, 0.75, 107, 117) # all eligible persons - this seems to be the HLI number
@@ -202,6 +203,9 @@ bolton.cohen.d
 # calculate effect size for CONTROL group, e.g. standardized pre-post difference among the untreated
 bolton.control.cohen <- cohen.d(23.65, 21.14, 6.3, 8.19, 178, 178)
 bolton.control.cohen
+
+# standardized mean effect (non-cohen's D) for Bolton
+bolton.sme <- (23.64/(6.3*sqrt(178))) - 21.14/(8.19*sqrt(178))
 
 ################### ################### ################### ################### ################### 
 # Part 3: Some Bayesian work
@@ -223,19 +227,14 @@ N.samples <- nrow(strongminds.data.1)
 #strongminds.data.1$pre.post.adjusted.sd <- sqrt(strongminds.data.1$pre_sd^2 + strongminds.data.1$post_sd_2^2)
 
 strongminds.data.1$pre.post.adjusted.change <- strongminds.data.1$post_mean - strongminds.data.1$pre_mean
-strongminds.data.1$pre.post.adjusted.sd <- sqrt(strongminds.data.1$pre_sd^2 + strongminds.data.1$post_sd^2)
+strongminds.data.1$standardized.mean.difference.raw <- ((strongminds.data.1$post_mean)/(strongminds.data.1$post_sd)) - ((strongminds.data.1$pre_mean)/(strongminds.data.1$pre_sd))
 
 # use the "control effect size" from Bolton 2003, converted into our units
 # and adjusted for program length (16 in the case of Bolton, 8 for us)
-strongminds.data.1$counterfactual.score.change <- strongminds.data.1$pre.post.adjusted.sd * (bolton.control.cohen/16)*8
+# as a very, very rough way of getting a counterfactual
+# Bolton: https://jamanetwork.com/journals/jama/fullarticle/196766
 
-# adjusted change (relative to control)
-# create backed-out SDs for SM programs taking into account attrition
-# assume a null effect for all attriters and recalculate the sd on that basis
-strongminds.data.1$adjusted_change <- strongminds.data.1$pre.post.adjusted.change - strongminds.data.1$counterfactual.score.change
-
-# standardized mean difference
-strongminds.data.1$standardized.mean.difference <- strongminds.data.1$adjusted_change / strongminds.data.1$pre.post.adjusted.sd
+strongminds.data.1$standardized.mean.difference <- strongminds.data.1$standardized.mean.difference.raw - ((bolton.sme/16)*8)
 
 # via https://pubmed.ncbi.nlm.nih.gov/31948935/
 # a prior on the standardized mean difference between pre and post in a meta analysis
@@ -269,7 +268,6 @@ plot(density(mu.posterior))
 
 # posterior median effect estimate
 median(mu.posterior)
-# SDs of the score difference are in the neighborhood of 4, so this suggests a reduction of around 4
 
 ### Visualize prior, posterior, evidence
 prior.density <- rnorm(10000, prior_mean, prior_sd)
@@ -309,7 +307,6 @@ plot(density(mu.posterior.con))
 
 # posterior median effect estimate
 median(mu.posterior.con)
-# SDs of the score difference are in the neighborhood of 4, so this suggests a reduction of around 7
 
 ### Visualize prior, posterior, evidence
 prior.density.con <- rnorm(10000, conservative_mean, conservative_sd)
@@ -321,6 +318,109 @@ ggplot() +
   guides(fill=guide_legend(title="")) +
   ggtitle("The data — which could be hard to believe —\nis doing most of the work here!")
 
+################### Update on a very conservative prior ###################
+
+very_conservative_mean <- 0
+very_conservative_sd <- 0.1
+
+sm_data_very_con <- list(N = N.samples,
+                    adjusted_change = strongminds.data.1$standardized.mean.difference,
+                    #adjusted_change = strongminds.data.1$adjusted_change,
+                    #change_sd = strongminds.data.1$pre.post.adjusted.sd,
+                    change_sd = rep(1, length(strongminds.data.1$standardized.mean.difference)),  # because it's standardized
+                    prior_mean = very_conservative_mean,
+                    prior_sd = very_conservative_sd
+)
+
+fit_rstan_very_con <- stan(
+  file = "sm_meta1.stan",
+  data = sm_data_very_con,
+  iter = 4000,
+  cores = mc.cores
+)
+
+
+extracted.fit.very.con <- rstan::extract(fit_rstan_very_con)
+mu.posterior.very.con <- extracted.fit.very.con$mu
+plot(density(mu.posterior.very.con))
+
+# posterior median effect estimate
+median(mu.posterior.very.con)
+
+### Visualize prior, posterior, evidence
+prior.density.very.con <- rnorm(10000, very_conservative_mean, very_conservative_sd)
+
+ggplot() +
+  geom_density(aes(x = prior.density.very.con, fill="Prior"), alpha=0.5) +
+  geom_density(aes(x = mu.posterior.very.con, fill="Posterior"), alpha=0.5) +
+  geom_density(aes(x = strongminds.data.1$standardized.mean.difference, fill="Data"), alpha=0.5) +
+  guides(fill=guide_legend(title="")) +
+  ggtitle("Prior again doing most of the work")
+
+################### Update on a general prior about psych interventions ###################
+
+# Source https://pubmed.ncbi.nlm.nih.gov/24789675/
+# Via Scott Alexander https://slatestarcodex.com/blog_images/forestplotpaper.pdf
+
+general_mean <- -0.5 # making it negative because we're talking about a reduction in depression scores
+general_sd <- 0.1
+
+sm_data_general <- list(N = N.samples,
+                         adjusted_change = strongminds.data.1$standardized.mean.difference,
+                         #adjusted_change = strongminds.data.1$adjusted_change,
+                         #change_sd = strongminds.data.1$pre.post.adjusted.sd,
+                         change_sd = rep(1, length(strongminds.data.1$standardized.mean.difference)),  # because it's standardized
+                         prior_mean = general_mean,
+                         prior_sd = general_sd
+)
+
+fit_rstan_general <- stan(
+  file = "sm_meta1.stan",
+  data = sm_data_general,
+  iter = 4000,
+  cores = mc.cores
+)
+
+
+extracted.fit.general <- rstan::extract(fit_rstan_general)
+mu.posterior.general <- extracted.fit.general$mu
+plot(density(mu.posterior.general))
+
+# posterior median effect estimate
+median(mu.posterior.general)
+
+### Visualize prior, posterior, evidence
+prior.density.general <- rnorm(10000, general_mean, general_sd)
+
+ggplot() +
+  geom_density(aes(x = prior.density.general, fill="Prior"), alpha=0.5) +
+  geom_density(aes(x = mu.posterior.general, fill="Posterior"), alpha=0.5) +
+  geom_density(aes(x = strongminds.data.1$standardized.mean.difference, fill="Data"), alpha=0.5) +
+  guides(fill=guide_legend(title="")) +
+  ggtitle("Prior again (again) doing most of the work")
+
+################### Plotting all posteriors ###################
+
+ggplot() +
+  geom_density(aes(x = mu.posterior, fill="IPT-G prior"), alpha=0.5) +
+  geom_density(aes(x = mu.posterior.general, fill="General psych prior"), alpha=0.5) +
+  geom_density(aes(x = mu.posterior.con, fill="Weak null prior"), alpha=0.5) +
+  geom_density(aes(x = mu.posterior.very.con, fill="Strong null prior"), alpha=0.5) +
+  guides(fill=guide_legend(title="Prior choice")) +
+  ggtitle("Estimates of StrongMinds effect size under different prior choices")
+  
+
+################### What's our cost-effectiveness if we use the general psych prior? ###################
+
+# very rough
+
+effect.size <- abs(median(mu.posterior)) # replace, for instance, with mu.posterior
+rough.cost.per.person <- 162 # think this is a high-ish estimate for SM
+uganda.wellby.sd <- 2.3085
+wellby.benchmark <- 166
+strongminds.ce <- rough.cost.per.person/(effect.size*uganda.wellby.sd)
+strongminds.gd.multiple <- wellby.benchmark/strongminds.ce
+strongminds.gd.multiple
 
 
 ######### UNUSED DETRITUS ########
