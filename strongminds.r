@@ -62,6 +62,7 @@ cohen.d <- function(mu1, mu2, se1, se2, n1, n2) {
 # the idea here is to imagine that, for all of the attriters, the treatment
 # made approximately no difference, e.g. that all attriters had the mean treatment
 # value before and after the intervention.
+# function currently unused
 deflate.mean.and.sd <- function(pre_mean, pre_sd, post_mean, post_sd, pre_n, post_n) {
   attrition <- pre_n - post_n
   deflated.mean <- ((post_mean*post_n) + (attrition*pre_mean))/pre_n
@@ -239,16 +240,15 @@ strongminds.data.1$standardized.mean.difference <- strongminds.data.1$standardiz
 # via https://pubmed.ncbi.nlm.nih.gov/31948935/
 # a prior on the standardized mean difference between pre and post in a meta analysis
 # of interventions to mitigate depressive symptoms in adults
-# 0.94 [0.89, 1.30], so an s.d. of approximately 0.1
-# I chose "other psychotherapies" instead of "interpersonal therapy" for adults with depression as the appropriate reference class
+# 1.09 [0.89, 1.30], so an s.d. of approximately 0.1
+# I chose a prior for psychosocial interventions acting on adults with depression in LMICs
+# Line 3, Figure 2 in the above paper.
 
-prior_mean <- -0.94 # negative because in our context this is a reduction in PHQ-9 scores
+prior_mean <- -1.09 # negative because in our context this is a reduction in PHQ-9 scores
 prior_sd <- 0.1
 
 sm_data <- list(N = N.samples,
                 adjusted_change = strongminds.data.1$standardized.mean.difference,
-                #adjusted_change = strongminds.data.1$adjusted_change,
-                #change_sd = strongminds.data.1$pre.post.adjusted.sd,
                 change_sd = rep(1, length(strongminds.data.1$standardized.mean.difference)),  # because it's standardized
                 prior_mean = prior_mean,
                 prior_sd = prior_sd
@@ -286,8 +286,6 @@ conservative_sd <- 1
 
 sm_data_con <- list(N = N.samples,
                 adjusted_change = strongminds.data.1$standardized.mean.difference,
-                #adjusted_change = strongminds.data.1$adjusted_change,
-                #change_sd = strongminds.data.1$pre.post.adjusted.sd,
                 change_sd = rep(1, length(strongminds.data.1$standardized.mean.difference)),  # because it's standardized
                 prior_mean = conservative_mean,
                 prior_sd = conservative_sd
@@ -325,8 +323,6 @@ very_conservative_sd <- 0.1
 
 sm_data_very_con <- list(N = N.samples,
                     adjusted_change = strongminds.data.1$standardized.mean.difference,
-                    #adjusted_change = strongminds.data.1$adjusted_change,
-                    #change_sd = strongminds.data.1$pre.post.adjusted.sd,
                     change_sd = rep(1, length(strongminds.data.1$standardized.mean.difference)),  # because it's standardized
                     prior_mean = very_conservative_mean,
                     prior_sd = very_conservative_sd
@@ -346,6 +342,7 @@ plot(density(mu.posterior.very.con))
 
 # posterior median effect estimate
 median(mu.posterior.very.con)
+# SDs of the score difference are in the neighborhood of 4, so this suggests a reduction of around 7
 
 ### Visualize prior, posterior, evidence
 prior.density.very.con <- rnorm(10000, very_conservative_mean, very_conservative_sd)
@@ -367,8 +364,6 @@ general_sd <- 0.1
 
 sm_data_general <- list(N = N.samples,
                          adjusted_change = strongminds.data.1$standardized.mean.difference,
-                         #adjusted_change = strongminds.data.1$adjusted_change,
-                         #change_sd = strongminds.data.1$pre.post.adjusted.sd,
                          change_sd = rep(1, length(strongminds.data.1$standardized.mean.difference)),  # because it's standardized
                          prior_mean = general_mean,
                          prior_sd = general_sd
@@ -388,6 +383,7 @@ plot(density(mu.posterior.general))
 
 # posterior median effect estimate
 median(mu.posterior.general)
+# SDs of the score difference are in the neighborhood of 4, so this suggests a reduction of around 7
 
 ### Visualize prior, posterior, evidence
 prior.density.general <- rnorm(10000, general_mean, general_sd)
@@ -402,7 +398,7 @@ ggplot() +
 ################### Plotting all posteriors ###################
 
 ggplot() +
-  geom_density(aes(x = mu.posterior, fill="IPT-G prior"), alpha=0.5) +
+  geom_density(aes(x = mu.posterior, fill="LMIC depression treatment prior"), alpha=0.5) +
   geom_density(aes(x = mu.posterior.general, fill="General psych prior"), alpha=0.5) +
   geom_density(aes(x = mu.posterior.con, fill="Weak null prior"), alpha=0.5) +
   geom_density(aes(x = mu.posterior.very.con, fill="Strong null prior"), alpha=0.5) +
@@ -410,11 +406,13 @@ ggplot() +
   ggtitle("Estimates of StrongMinds effect size under different prior choices")
   
 
-################### What's our cost-effectiveness if we use the general psych prior? ###################
+################### What's our cost-effectiveness if we use the LMIC psych prior? ###################
+
+# Note that this uses only this prior (which is not specifically about IPT-G) and no other previous evidence
 
 # very rough
 
-effect.size <- abs(median(mu.posterior)) # replace, for instance, with mu.posterior
+effect.size <- abs(median(mu.posterior)) # replace, for instance, with mu.posterior.general for a more standard prior about psych interventions
 rough.cost.per.person <- 162 # think this is a high-ish estimate for SM
 uganda.wellby.sd <- 2.3085
 wellby.benchmark <- 166
@@ -434,3 +432,5 @@ fit_rstan <- mod$sample(
   adapt_delta=0.999,
   parallel_chains = mc.cores,
 )
+
+
